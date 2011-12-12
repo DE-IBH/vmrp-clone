@@ -82,7 +82,7 @@ sub get_rpools($$) {
     my $ident = shift || '';
     my $name = $rp->name;
 
-    print STDERR "${ident}[$#rpools] $name\n";
+    print STDERR "[$#rpools]$ident $name\n";
 
     if(defined($rp->resourcePool)) {
 	foreach my $crp (@{$rp->resourcePool}) {
@@ -91,10 +91,16 @@ sub get_rpools($$) {
     }
 }
 
-print STDERR "\nRetrieving resource pools:\n";
-print STDERR   "==========================\n";
+print STDERR "\nSelect restore root:\n";
+print STDERR   "====================\n";
 
 get_rpools($cluster->resourcePool, '');
+do {
+    print STDERR "\n> ";
+
+    chomp($i = <>);
+    $i = int($i);
+} while($i<0 || $i>$#rpools);
 
 
 # disconnect from the server
