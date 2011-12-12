@@ -1,0 +1,70 @@
+#!/usr/bin/perl
+
+use strict;
+use warnings;
+
+use Data::Dumper;
+use VMware::VIRuntime;
+use XML::Simple;
+
+my %opts = (
+   fn => {
+      type => "=s",
+      help => "XML resource pool config filename (vmrp-clone)",
+      required => 1,
+   },
+);
+
+Opts::add_options(%opts);
+Opts::parse();
+Opts::validate();
+Util::connect();
+
+$|++;
+
+my $xs = XML::Simple->new(RootName => 'vmrp-clone', ForceArray => qw(VM));
+my $config = $xs->XMLin(Opts::get_option('fn'));
+
+my @vm_clusters = @{Vim::find_entity_views(view_type => 'ClusterComputeResource')};
+
+my $i;
+do {
+    print STDERR "\nSelect cluster:\n";
+    print STDERR   "===============\n";
+
+    $i = 0;
+    foreach (@vm_clusters) {
+	print STDERR " [", ++$i, "] ", $_->name, "\n";
+    }
+
+    print STDERR "\n> ";
+
+    chomp($i = <>);
+    $i = int($i);
+} while($i<1 || $i>$#vm_clusters+1);
+$i--;
+my $cluster = $vm_clusters[$i];
+
+my @rpools = ($cluster->resourcePool);
+sub get_rpools($$) {
+    my $rp = Vim::get_view(mo_ref => shift);
+    my $ident = shift || '';
+    my $name = $rp->name;
+
+    print STDERR "${ident}[$#rpools] $name\n";
+
+    if(defined($rp->resourcePool)) {
+	foreach my $crp (@{$rp->resourcePool}) {
+	    &get_rpools($crp, "$ident ");
+	}
+    }
+}
+
+print STDERR "\nRetrieving resource pools:\n";
+print STDERR   "==========================\n";
+
+get_rpools($cluster->resourcePool, '');
+
+
+# disconnect from the server
+Util::disconnect();

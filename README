@@ -1,0 +1,7 @@
+VMware Resource Pool Clone
+==========================
+
+vmrp-clone consists of two small scripts. vmrp-clone-backup gets the
+current resource pool configuration of a cluster and saves it into a
+XML file. vmrp-clone-restore can be used to create/change a resource
+pool configuration using this XML file.

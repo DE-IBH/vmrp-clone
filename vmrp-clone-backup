@@ -1,0 +1,106 @@
+#!/usr/bin/perl
+
+use strict;
+use warnings;
+
+use Data::Dumper;
+use VMware::VIRuntime;
+use XML::Simple;
+
+Opts::parse();
+Opts::validate();
+Util::connect();
+
+$|++;
+
+my @vm_clusters = @{Vim::find_entity_views(view_type => 'ClusterComputeResource')};
+
+my $i;
+do {
+    print STDERR "\nSelect cluster:\n";
+    print STDERR   "===============\n";
+
+    $i = 0;
+    foreach (@vm_clusters) {
+	print STDERR " [", ++$i, "] ", $_->name, "\n";
+    }
+
+    print STDERR "\n> ";
+
+    chomp($i = <>);
+    $i = int($i);
+} while($i<1 || $i>$#vm_clusters+1);
+$i--;
+my $cluster = $vm_clusters[$i];
+
+my $config = {};
+sub get_specs($$$) {
+    my $ref = shift;
+    my $sp = shift;
+    my $ident = shift;
+
+    foreach my $alloc (qw(cpuAllocation memoryAllocation)) {
+	foreach my $key (qw(expandableReservation limit reservation shares)) {
+	    if($key eq 'shares') {
+		$ref->{$alloc}->{"$key.level"} = $sp->$alloc->$key->level->val;
+		$ref->{$alloc}->{"$key.shares"} = $sp->$alloc->$key->shares;
+	    }
+	    else {
+		$ref->{$alloc}->{"$key"} = $sp->$alloc->$key;
+	    }
+	}
+    }
+}
+
+sub get_vms($$$) {
+    my $ref = shift;
+    my $vms = shift;
+    my $ident = shift;
+
+    unless(defined($vms)) {
+	$ref->{'VMs'} = [];
+	return;
+    }
+
+    foreach my $vm (@{$vms}) {
+	$vm = Vim::get_view(mo_ref => $vm);
+	push(@{$ref->{'VM'}}, $vm->name);
+    }
+    print STDERR "$ident ", join(', ', @{$ref->{'VM'}}), "\n";
+}
+
+sub get_rpools($$$) {
+    my $ref = shift;
+    my $rp = Vim::get_view(mo_ref => shift);
+    my $ident = shift || '';
+    my $name = $rp->name;
+
+    print STDERR "$ident$name\n";
+
+    $ref->{$name} = {pools => {}};
+    get_specs($ref->{$name}, $rp->config, $ident);
+    get_vms($ref->{$name}, $rp->vm, $ident);
+
+    if(defined($rp->resourcePool)) {
+	foreach my $crp (@{$rp->resourcePool}) {
+	    &get_rpools($ref->{$name}->{pools}, $crp, "$ident ");
+	}
+    }
+}
+
+print STDERR "\nRetrieving resource pools:\n";
+print STDERR   "==========================\n";
+
+get_rpools($config, $cluster->resourcePool, '');
+
+
+my $xs = XML::Simple->new(RootName => 'vmrp-clone', ForceArray => qw(VM));
+my $fn = $cluster->name.'.xml';
+open my $fh, '>:encoding(utf-8)', $fn or die "open(): $!\n";
+print $fh "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n";
+$xs->XMLout($config, OutputFile => $fh);
+
+print STDERR "\nResource pool config has been written to '$fn'...\n\n";
+
+# disconnect from the server
+Util::disconnect();
