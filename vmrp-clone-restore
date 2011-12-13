@@ -162,12 +162,22 @@ my $default_spec = ResourceConfigSpec->new(
 	),
 );
 
+sub crp_exists($$) {
+    my $views = shift;
+    my $name = shift;
+
+    foreach my $view (@$views) {
+	return $view if($view->name eq $name);
+    }
+
+    return undef;
+}
+
 sub set_childs($$$) {
     my $name = shift;
-    my $rp = shift;
+    my $rp_view = shift;
     my $cfg = shift;
 
-    my $rp_view = Vim::get_view(mo_ref => $rp);
     unless(defined(eval {
 	$rp_view->UpdateConfig(config => get_rpspecs($cfg));
 	1;
@@ -175,14 +185,17 @@ sub set_childs($$$) {
 	print STDERR "Unable to set resource pool specification for '$name': $@\n";
     }
 
+    my $crp_views = Vim::get_views(mo_ref_array => $rp_view->resourcePool);
     foreach my $cname (keys %{$cfg->{'pools'}}) {
-	my $r = $rp_view->CreateResourcePool(name => $cname, spec => $default_spec);
+	my $r = crp_exists($crp_views, $cname);
+	$r = $rp_view->CreateResourcePool(name => $cname, spec => $default_spec)
+	    unless defined($r);
 	&set_childs($cname, $r, $cfg->{'pools'}->{$cname});
     }
 }
 
 my ($name) = (keys %$config);
-set_childs($name, $rpool, $config->{$name});
+set_childs($name, Vim::get_view(mo_ref => $rpool), $config->{$name});
 
 # disconnect from the server
 Util::disconnect();
