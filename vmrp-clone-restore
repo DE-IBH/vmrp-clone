@@ -53,7 +53,7 @@ Util::connect();
 
 $|++;
 
-my $xs = XML::Simple->new(RootName => 'vmrp-clone', ForceArray => qw(VM));
+my $xs = XML::Simple->new(RootName => 'vmrp-clone', ForceArray => 0);
 my $config = $xs->XMLin(Opts::get_option('fn'));
 
 my @vm_clusters = @{Vim::find_entity_views(view_type => 'ClusterComputeResource')};
@@ -71,8 +71,7 @@ do {
     print STDERR "\n> ";
 
     chomp($i = <>);
-    $i = int($i);
-} while($i<1 || $i>$#vm_clusters+1);
+} while(!($i =~ /^\d+\s*$/) || int($i)<1 || int($i)>$#vm_clusters+1);
 $i--;
 my $cluster = $vm_clusters[$i];
 
@@ -86,6 +85,7 @@ sub get_rpools($$) {
 
     if(defined($rp->resourcePool)) {
 	foreach my $crp (@{$rp->resourcePool}) {
+	    push(@rpools, $crp);
 	    &get_rpools($crp, "$ident ");
 	}
     }
@@ -95,13 +95,94 @@ print STDERR "\nSelect restore root:\n";
 print STDERR   "====================\n";
 
 get_rpools($cluster->resourcePool, '');
+
+print STDERR "\n";
+
 do {
-    print STDERR "\n> ";
+    print STDERR "> ";
 
     chomp($i = <>);
-    $i = int($i);
-} while($i<0 || $i>$#rpools);
+} while(!($i =~ /^\d+\s*$/) || int($i)<0 || int($i)>$#rpools);
 
+my $rpool = $rpools[$i];
+
+sub get_sharesinfo($) {
+    my $alloc = shift;
+
+    $alloc->{'shares.level'} eq 'custom' ?
+	(
+	    level => SharesLevel->new($alloc->{'shares.level'}),
+	    shares => $alloc->{'shares.shares'},
+	)
+    :
+	(
+	    level => SharesLevel->new($alloc->{'shares.level'}),
+	    shares => 0,
+	)
+    ;
+}
+
+sub get_rpspecs($) {
+    my $cfg = shift;
+
+    my $spec = ResourceConfigSpec->new(
+	cpuAllocation => ResourceAllocationInfo->new(
+	    limit => $cfg->{'cpuAllocation'}->{'limit'},
+	    expandableReservation => $cfg->{'cpuAllocation'}->{'expandableReservation'},
+	    reservation => $cfg->{'cpuAllocation'}->{'reservation'},
+	    shares => SharesInfo->new(get_sharesinfo($cfg->{'cpuAllocation'})),
+	),
+	memoryAllocation => ResourceAllocationInfo->new(
+	    limit => $cfg->{'memoryAllocation'}->{'limit'},
+	    expandableReservation => $cfg->{'memoryAllocation'}->{'expandableReservation'},
+	    reservation => $cfg->{'memoryAllocation'}->{'reservation'},
+	    shares => SharesInfo->new(get_sharesinfo($cfg->{'memoryAllocation'})),
+	),
+    );
+}
+
+my $default_spec = ResourceConfigSpec->new(
+	cpuAllocation => ResourceAllocationInfo->new(
+	    limit => -1,
+	    expandableReservation => 1,
+	    reservation => 0,
+	    shares => SharesInfo->new(
+		level => SharesLevel->new('normal'),
+		shares => 0,
+	    ),
+	),
+	memoryAllocation => ResourceAllocationInfo->new(
+	    limit => -1,
+	    expandableReservation => 1,
+	    reservation => 0,
+	    shares => SharesInfo->new(
+		level => SharesLevel->new('normal'),
+		shares => 0,
+	    ),
+	),
+);
+
+sub set_childs($$$) {
+    my $name = shift;
+    my $rp = shift;
+    my $cfg = shift;
+
+    my $rp_view = Vim::get_view(mo_ref => $rp);
+    unless(defined(eval {
+	$rp_view->UpdateConfig(config => get_rpspecs($cfg));
+	1;
+    })) {
+	print STDERR "Unable to set resource pool specification for '$name': $@\n";
+    }
+
+    foreach my $cname (keys %{$cfg->{'pools'}}) {
+	my $r = $rp_view->CreateResourcePool(name => $cname, spec => $default_spec);
+	&set_childs($cname, $r, $cfg->{'pools'}->{$cname});
+    }
+}
+
+my ($name) = (keys %$config);
+set_childs($name, $rpool, $config->{$name});
 
 # disconnect from the server
 Util::disconnect();
