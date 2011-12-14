@@ -53,7 +53,7 @@ Util::connect();
 
 $|++;
 
-my $xs = XML::Simple->new(RootName => 'vmrp-clone', ForceArray => 0);
+my $xs = XML::Simple->new(RootName => 'vmrp-clone', ForceArray => ['VM', 'pools']);
 my $config = $xs->XMLin(Opts::get_option('fn'));
 
 my @vm_clusters = @{Vim::find_entity_views(view_type => 'ClusterComputeResource')};
@@ -173,10 +173,13 @@ sub crp_exists($$) {
     return undef;
 }
 
-sub set_childs($$$) {
+sub set_childs($$$$) {
     my $name = shift;
+    my $ident = shift;
     my $rp_view = shift;
     my $cfg = shift;
+
+    print "$ident$name: ";
 
     unless(defined(eval {
 	$rp_view->UpdateConfig(config => get_rpspecs($cfg));
@@ -185,17 +188,35 @@ sub set_childs($$$) {
 	print STDERR "Unable to set resource pool specification for '$name': $@\n";
     }
 
-    my $crp_views = Vim::get_views(mo_ref_array => $rp_view->resourcePool);
-    foreach my $cname (keys %{$cfg->{'pools'}}) {
-	my $r = crp_exists($crp_views, $cname);
-	$r = Vim::get_view(mo_ref => $rp_view->CreateResourcePool(name => $cname, spec => $default_spec))
-	    unless defined($r);
-	&set_childs($cname, $r, $cfg->{'pools'}->{$cname});
+    if(defined($cfg->{'VM'})) {
+	foreach my $VM (@{$cfg->{'VM'}}) {
+	    my $VM_view = Vim::find_entity_view(view_type => 'VirtualMachine', filter => {'config.name' => $VM});
+
+	    if (!defined $VM_view) {
+		print "!$VM ";
+	    }
+	    else {
+		print "!" unless(eval { $rp_view->MoveIntoResourcePool(list => [$VM_view->resourceConfig->entity]); 1; });
+		print "$VM ";
+	    }
+	}
+    }
+    print "\n";
+
+    # This hack checks if $cfg->{'pools'} is a valid hash ref.
+    if (eval { keys %{$cfg->{'pools'}}; 1; }) {
+	my $crp_views = Vim::get_views(mo_ref_array => $rp_view->resourcePool);
+	foreach my $cname (keys %{$cfg->{'pools'}}) {
+	    my $r = crp_exists($crp_views, $cname);
+	    $r = Vim::get_view(mo_ref => $rp_view->CreateResourcePool(name => $cname, spec => $default_spec))
+		unless defined($r);
+	    &set_childs($cname, "$ident ", $r, $cfg->{'pools'}->{$cname});
+	}
     }
 }
 
 my ($name) = (keys %$config);
-set_childs($name, Vim::get_view(mo_ref => $rpool), $config->{$name});
+set_childs($name, '', Vim::get_view(mo_ref => $rpool), $config->{$name});
 
 # disconnect from the server
 Util::disconnect();
