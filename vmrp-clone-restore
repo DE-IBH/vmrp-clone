@@ -188,7 +188,7 @@ sub set_childs($$$) {
     my $crp_views = Vim::get_views(mo_ref_array => $rp_view->resourcePool);
     foreach my $cname (keys %{$cfg->{'pools'}}) {
 	my $r = crp_exists($crp_views, $cname);
-	$r = $rp_view->CreateResourcePool(name => $cname, spec => $default_spec)
+	$r = Vim::get_view(mo_ref => $rp_view->CreateResourcePool(name => $cname, spec => $default_spec))
 	    unless defined($r);
 	&set_childs($cname, $r, $cfg->{'pools'}->{$cname});
     }
